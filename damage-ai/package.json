@@ -1,0 +1,46 @@
+{
+  "name": "damage-ai",
+  "version": "2.0.0",
+  "description": "M-02 damage assessment — modular monolith (Gemini + Sharp, stateless)",
+  "private": true,
+  "type": "module",
+  "main": "src/server.ts",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "worker": "tsx src/workers/assessment.worker.ts",
+    "worker:dev": "tsx watch src/workers/assessment.worker.ts",
+    "start": "node dist/server.js",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "download-models": "node scripts/download-mobile-sam.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1121.0",
+    "@aws-sdk/s3-request-presigner": "^3.1121.0",
+    "@google/genai": "^2.19.0",
+    "bullmq": "^6.3.2",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "helmet": "^8.3.0",
+    "ioredis": "^6.0.0",
+    "jsonwebtoken": "^9.0.3",
+    "onnxruntime-node": "^1.29.0",
+    "opossum": "^10.0.0",
+    "pino": "^10.3.1",
+    "pino-http": "^11.0.0",
+    "sharp": "^0.35.4",
+    "tsx": "^4.23.12",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^26.4.0",
+    "@types/opossum": "^8.1.9",
+    "pino-pretty": "^13.1.3",
+    "typescript": "^7.0.2"
+  },
+  "allowScripts": {
+    "onnxruntime-node@1.29.0": true
+  }
+}

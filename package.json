@@ -1,0 +1,14 @@
+{
+  "name": "damage-detection",
+  "private": true,
+  "description": "Shortcut scripts only — install deps inside damage-ai, test-backend, test-web",
+  "scripts": {
+    "dev": "npm run dev --prefix damage-ai",
+    "dev:ai": "npm run dev --prefix damage-ai",
+    "worker:ai": "npm run worker:dev --prefix damage-ai",
+    "dev:backend": "npm run dev --prefix test-backend",
+    "dev:web": "npm run dev --prefix test-web",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down"
+  }
+}

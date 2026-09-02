@@ -1,0 +1,45 @@
+import { config } from "dotenv";
+
+config();
+
+const env = process.env;
+
+export const envConfig = {
+  PORT: Number(env.PORT) || 3000,
+  NODE_ENV: env.NODE_ENV ?? "development",
+  JWT_SECRET: env.JWT_SECRET ?? "",
+  WEBHOOK_URL: env.WEBHOOK_URL ?? "",
+  WEBHOOK_SECRET: env.WEBHOOK_SECRET ?? "",
+  REDIS_URL: env.REDIS_URL ?? "",
+  AI_API_KEY: env.AI_API_KEY ?? "",
+  AI_MODEL: env.AI_MODEL ?? "gemini-2.5-flash",
+  AI_FALLBACK_MODEL: env.AI_FALLBACK_MODEL ?? env.AI_MODEL ?? "gemini-2.5-flash",
+  GEMINI_TEMPERATURE: Number(env.GEMINI_TEMPERATURE) || 0.15,
+  GEMINI_MAX_OUTPUT_TOKENS: Number(env.GEMINI_MAX_OUTPUT_TOKENS) || 2048,
+  MAX_CONCURRENT_GEMINI: Number(env.MAX_CONCURRENT_GEMINI) || 2,
+  MAX_IMAGES_PER_REQUEST: Number(env.MAX_IMAGES_PER_REQUEST) || 32,
+  IMAGE_MAX_EDGE: Number(env.IMAGE_MAX_EDGE) || 2048,
+  GEMINI_IMAGE_MAX_EDGE: Number(env.GEMINI_IMAGE_MAX_EDGE) || 1536,
+  CONFIDENCE_REVIEW_THRESHOLD: Number(env.CONFIDENCE_REVIEW_THRESHOLD) || 0.7,
+  CONFIDENCE_VERIFY_MIN: Number(env.CONFIDENCE_VERIFY_MIN) || 0.7,
+  CONFIDENCE_ACCEPT_MIN: Number(env.CONFIDENCE_ACCEPT_MIN) || 0.9,
+  BBOX_MERGE_IOU_THRESHOLD: Number(env.BBOX_MERGE_IOU_THRESHOLD) || 0.6,
+  R2_ACCOUNT_ID: env.R2_ACCOUNT_ID ?? "",
+  R2_ACCESS_KEY: env.R2_ACCESS_KEY ?? "",
+  R2_SECRET_KEY: env.R2_SECRET_KEY ?? "",
+  R2_BUCKET: env.R2_BUCKET ?? "",
+  R2_PUBLIC_URL: env.R2_PUBLIC_URL ?? "",
+  LOG_LEVEL: env.LOG_LEVEL ?? "info",
+  SEG_ENABLED: env.SEG_ENABLED === "true",
+  SEG_PROVIDER: env.SEG_PROVIDER ?? "mobile-sam",
+  SEG_ENCODER_PATH: env.SEG_ENCODER_PATH ?? "./models/mobile_sam_encoder.onnx",
+  SEG_DECODER_PATH: env.SEG_DECODER_PATH ?? "./models/mobile_sam_decoder.onnx",
+  MAX_REGIONS_PER_IMAGE: Number(env.MAX_REGIONS_PER_IMAGE) || 4,
+  SEG_MIN_MASK_IOU: Number(env.SEG_MIN_MASK_IOU) || 0.5,
+  SEG_MIN_MASK_AREA: Number(env.SEG_MIN_MASK_AREA) || 0.001,
+  GEMINI_REGION_MAX_EDGE: Number(env.GEMINI_REGION_MAX_EDGE) || 768,
+  SEG_CAR_CROP_ENABLED: env.SEG_CAR_CROP_ENABLED !== "false",
+  GEMINI_INR_PER_USD: Number(env.GEMINI_INR_PER_USD) || 94,
+  GEMINI_USD_PER_M_INPUT: Number(env.GEMINI_USD_PER_M_INPUT) || 0.3,
+  GEMINI_USD_PER_M_OUTPUT: Number(env.GEMINI_USD_PER_M_OUTPUT) || 2.5,
+};

@@ -1,0 +1,128 @@
+name: damage-detection
+
+x-damage-ai-worker: &damage-ai-worker
+  build:
+    context: ./damage-ai
+    dockerfile: Dockerfile
+  command: ["npx", "tsx", "src/workers/assessment.worker.ts"]
+  env_file:
+    - .env
+  environment:
+    NODE_ENV: ${NODE_ENV:-production}
+    PORT: "3000"
+    REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+    WEBHOOK_URL: ${WEBHOOK_URL:-http://test-backend:3002/webhook}
+    AI_MODEL: ${AI_MODEL:-gemini-2.5-flash}
+    MAX_CONCURRENT_GEMINI: ${MAX_CONCURRENT_GEMINI:-2}
+    SEG_ENABLED: ${SEG_ENABLED:-false}
+    LOG_LEVEL: ${LOG_LEVEL:-info}
+  depends_on:
+    redis:
+      condition: service_healthy
+    damage-ai:
+      condition: service_started
+  networks:
+    - damage
+  restart: unless-stopped
+  healthcheck:
+    disable: true
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - damage
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - damage
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  damage-ai:
+    build:
+      context: ./damage-ai
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      PORT: "3000"
+      NODE_ENV: ${NODE_ENV:-production}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      WEBHOOK_URL: ${WEBHOOK_URL:-http://test-backend:3002/webhook}
+      AI_MODEL: ${AI_MODEL:-gemini-2.5-flash}
+      SEG_ENABLED: ${SEG_ENABLED:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${DAMAGE_AI_PORT:-3000}:3000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - damage
+    restart: unless-stopped
+
+  damage-ai-worker:
+    <<: *damage-ai-worker
+
+  test-backend:
+    build:
+      context: ./test-backend
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      PORT: ${BACKEND_PORT:-3002}
+      NODE_ENV: ${NODE_ENV:-production}
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/damage-detection}
+      DAMAGE_AI_URL: ${DAMAGE_AI_URL:-http://damage-ai:3000}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost}
+      WEBHOOK_URL: ${WEBHOOK_URL:-http://test-backend:3002/webhook}
+    expose:
+      - "${BACKEND_PORT:-3002}"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      damage-ai:
+        condition: service_started
+    networks:
+      - damage
+    restart: unless-stopped
+
+  test-web:
+    build:
+      context: ./test-web
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-}
+    ports:
+      - "${WEB_PORT:-80}:80"
+    depends_on:
+      - test-backend
+    networks:
+      - damage
+    restart: unless-stopped
+
+networks:
+  damage:
+    driver: bridge
+
+volumes:
+  mongo_data:
+  redis_data:
