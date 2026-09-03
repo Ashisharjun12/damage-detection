@@ -75,6 +75,13 @@ export type Severity = (typeof SEVERITIES)[number];
 export type ViewAngle = (typeof VIEW_ANGLES)[number];
 export type Recommendation = (typeof RECOMMENDATIONS)[number];
 
+export type ImageErrorCode =
+  | "UNREADABLE_DOCUMENT"
+  | "NO_DAMAGE_FOUND"
+  | "NOT_VEHICLE"
+  | "GEMINI_CALL_FAILED"
+  | "LOW_QUALITY";
+
 export type NormalizedBBox = {
   x_min: number;
   y_min: number;
@@ -133,7 +140,8 @@ export type ImageResult = {
   canonical_image_id?: string;
   damages: DamageInstance[];
   annotated_image_url?: string | null;
-  error_code?: string;
+  error_code?: ImageErrorCode | string;
+  user_message?: string;
 };
 
 export type DamageCluster = {

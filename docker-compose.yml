@@ -14,7 +14,6 @@ x-damage-ai-worker: &damage-ai-worker
     WEBHOOK_URL: ${WEBHOOK_URL:-http://test-backend:3002/webhook}
     AI_MODEL: ${AI_MODEL:-gemini-2.5-flash}
     MAX_CONCURRENT_GEMINI: ${MAX_CONCURRENT_GEMINI:-2}
-    SEG_ENABLED: ${SEG_ENABLED:-false}
     LOG_LEVEL: ${LOG_LEVEL:-info}
   depends_on:
     redis:
@@ -67,7 +66,6 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       WEBHOOK_URL: ${WEBHOOK_URL:-http://test-backend:3002/webhook}
       AI_MODEL: ${AI_MODEL:-gemini-2.5-flash}
-      SEG_ENABLED: ${SEG_ENABLED:-false}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "${DAMAGE_AI_PORT:-3000}:3000"

@@ -18,7 +18,17 @@ export function buildReviewFlags(
       flags.push(`image:${img.image_id}:quality`);
     }
     if (img.view_conflict) flags.push(`image:${img.image_id}:view_conflict`);
-    if (img.error_code) flags.push(`image:${img.image_id}:${img.error_code}`);
+    if (img.error_code) {
+      flags.push(`image:${img.image_id}:${img.error_code}`);
+      if (
+        img.error_code === "NO_DAMAGE_FOUND" ||
+        img.error_code === "UNREADABLE_DOCUMENT" ||
+        img.error_code === "NOT_VEHICLE" ||
+        img.error_code === "LOW_QUALITY"
+      ) {
+        flags.push(`review_required:${img.image_id}`);
+      }
+    }
   }
 
   for (const d of instances) {

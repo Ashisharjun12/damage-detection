@@ -1,12 +1,9 @@
 import type { DamageInstance } from "@/types/m02.v1.js";
-import type { MaskAnnotatedDamage } from "@/modules/detection/judge-region.js";
 
 export const COLORS = {
   Repair: "#22c55e",
   Replace: "#ef4444",
   Moderate: "#f97316",
-  MaskFill: "rgba(34, 197, 94, 0.35)",
-  MaskStroke: "#22c55e",
 };
 
 export function escapeXml(text: string): string {
@@ -22,10 +19,6 @@ export function boxColor(d: DamageInstance): string {
   if (d.recommendation === "Replace") return COLORS.Replace;
   if (d.severity === "Moderate") return COLORS.Moderate;
   return COLORS.Repair;
-}
-
-export function maskStrokeColor(d: DamageInstance): string {
-  return boxColor(d);
 }
 
 export function buildLabel(d: DamageInstance, index: number): string {
@@ -56,45 +49,6 @@ function bboxOverlay(
   ];
 }
 
-function maskCentroid(
-  mask: Uint8Array,
-  width: number,
-  height: number,
-): { x: number; y: number } {
-  let sumX = 0;
-  let sumY = 0;
-  let count = 0;
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      if (mask[y * width + x]) {
-        sumX += x;
-        sumY += y;
-        count++;
-      }
-    }
-  }
-  if (!count) return { x: width / 2, y: height / 2 };
-  return { x: sumX / count, y: sumY / count };
-}
-
-function maskOverlay(
-  d: MaskAnnotatedDamage,
-  index: number,
-  width: number,
-  height: number,
-): string[] {
-  const color = maskStrokeColor(d);
-  const label = buildLabel(d, index);
-  const centroid = maskCentroid(d.mask, d.maskWidth, d.maskHeight);
-  const labelX = Math.min(Math.round(centroid.x), width - 220);
-  const labelY = centroid.y > 36 ? centroid.y - 8 : centroid.y + 20;
-
-  return [
-    `<rect x="${labelX}" y="${labelY - 18}" width="220" height="22" fill="${color}" opacity="0.85"/>`,
-    `<text x="${labelX + 4}" y="${labelY}" fill="#ffffff" font-size="14" font-family="Arial, sans-serif">${label}</text>`,
-  ];
-}
-
 export function buildDamageOverlaySvg(
   damages: DamageInstance[],
   width: number,
@@ -104,11 +58,16 @@ export function buildDamageOverlaySvg(
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${overlays.join("")}</svg>`;
 }
 
-export function buildMaskOverlaySvg(
-  damages: MaskAnnotatedDamage[],
+/** Pixel rect for a normalized bbox (for tests). */
+export function bboxToPixelRect(
+  bbox: DamageInstance["bounding_box"],
   width: number,
   height: number,
-): string {
-  const overlays = damages.flatMap((d, i) => maskOverlay(d, i, width, height));
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${overlays.join("")}</svg>`;
+): { x: number; y: number; w: number; h: number } {
+  return {
+    x: Math.round(bbox.x_min * width),
+    y: Math.round(bbox.y_min * height),
+    w: Math.round((bbox.x_max - bbox.x_min) * width),
+    h: Math.round((bbox.y_max - bbox.y_min) * height),
+  };
 }

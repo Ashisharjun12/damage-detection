@@ -4,6 +4,7 @@ import type {
   ViewAngle,
 } from "@/types/m02.v1.js";
 import { normalizeLocationOnPart } from "@/modules/spatial/location.js";
+import { isClusterEligible } from "@/modules/detection/detect-damage.js";
 
 const VIEW_ADJACENT: Record<string, string[]> = {
   Front: ["Left", "Right"],
@@ -30,17 +31,18 @@ function matchScore(a: DamageInstance, b: DamageInstance): number {
 }
 
 export function clusterDamages(instances: DamageInstance[]): DamageCluster[] {
+  const eligible = instances.filter(isClusterEligible);
   const clusters: DamageCluster[] = [];
   const assigned = new Set<string>();
 
-  for (const inst of instances) {
+  for (const inst of eligible) {
     if (assigned.has(inst.instance_id)) continue;
 
     const group = [inst];
     assigned.add(inst.instance_id);
     let reviewCandidate = false;
 
-    for (const other of instances) {
+    for (const other of eligible) {
       if (assigned.has(other.instance_id)) continue;
       const score = matchScore(inst, other);
       if (score >= 0.8) {

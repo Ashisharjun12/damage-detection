@@ -50,6 +50,8 @@ export function SurveyImageTable({ surveyImages = [], reportImages = [] }) {
       viewAngle: reportImg?.view_angle ?? '—',
       damages: reportImg?.damages ?? [],
       processingStatus: reportImg?.processing_status ?? 'PENDING',
+      errorCode: reportImg?.error_code,
+      userMessage: reportImg?.user_message,
       canonicalImageId: reportImg?.canonical_image_id,
     };
   });
@@ -63,6 +65,8 @@ export function SurveyImageTable({ surveyImages = [], reportImages = [] }) {
         viewAngle: img.view_angle ?? '—',
         damages: img.damages ?? [],
         processingStatus: img.processing_status ?? 'PENDING',
+        errorCode: img.error_code,
+        userMessage: img.user_message,
         canonicalImageId: img.canonical_image_id,
       });
     });
@@ -135,6 +139,12 @@ export function SurveyImageTable({ surveyImages = [], reportImages = [] }) {
                       Duplicate — see {row.canonicalImageId}
                     </p>
                   )}
+                {row.errorCode && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    {row.errorCode}
+                    {row.userMessage ? ` — ${row.userMessage}` : ''}
+                  </p>
+                )}
               </div>
             </TableCell>
           </TableRow>

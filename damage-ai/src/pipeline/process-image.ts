@@ -4,7 +4,9 @@ import {
   uploadAnnotatedImage,
 } from "@/infrastructure/storage/r2.client.js";
 import { GeminiUsageTracker } from "@/infrastructure/gemini/usage.js";
+import { GeminiCallError } from "@/infrastructure/gemini/retry-policy.js";
 import { downloadImage } from "@/modules/ingest/download-image.js";
+import { upscaleImage } from "@/modules/ingest/resize-image.js";
 import {
   computeQualityScore,
   findDuplicate,
@@ -12,33 +14,30 @@ import {
   type DuplicateRecord,
 } from "@/modules/duplicate/find-duplicate.js";
 import { assessQuality } from "@/modules/quality/assess-quality.js";
-import { detectDamage, verifyDamageFinding } from "@/modules/detection/detect-damage.js";
 import {
-  judgeRegion,
-  type MaskAnnotatedDamage,
-} from "@/modules/detection/judge-region.js";
-import { detectView } from "@/modules/inspection/detect-view.js";
-import { filterGroundReject } from "@/modules/spatial/bbox.js";
-import { encodeImage } from "@/modules/spatial/mobile-sam/encode.js";
-import { decodeMask } from "@/modules/spatial/mobile-sam/decode.js";
+  detectDamage,
+  isClusterEligible,
+  verifyDamageFinding,
+} from "@/modules/detection/detect-damage.js";
+import { runImageGate } from "@/modules/inspection/gate-image.js";
+import { outcomeMessage } from "@/modules/inspection/image-outcomes.js";
 import {
-  filterSegmentationMasks,
-  proposeRegions,
-} from "@/modules/spatial/region-proposals.js";
-import type { SegmentationMask } from "@/modules/spatial/mobile-sam/types.js";
+  filterGroundReject,
+  filterOutsideVehicleBBox,
+  filterPartSpatialSanity,
+  isBorderlineGroundAdjacentBox,
+} from "@/modules/spatial/bbox.js";
 import {
   applyConfidenceGate,
   applySeveritySanity,
   dedupeInstances,
   filterBboxSanity,
 } from "@/modules/validation/validate-bbox.js";
-import {
-  renderAnnotation,
-  renderMaskAnnotation,
-} from "@/modules/annotation/render-annotation.js";
+import { renderAnnotation } from "@/modules/annotation/render-annotation.js";
 import type {
   DamageAssessmentRequest,
   DamageInstance,
+  ImageErrorCode,
   ImageResult,
 } from "@/types/m02.v1.js";
 import { logger } from "@/shared/logger.js";
@@ -48,9 +47,7 @@ export type ProcessImageResult = {
   instances: DamageInstance[];
   confidenceFlags: string[];
   verificationCalls: number;
-  geminiRegionCalls: number;
-  regionProposals: number;
-  annotationStyle: "bbox_overlay" | "mask_overlay";
+  annotationStyle: "bbox_overlay";
   geminiInputTokens: number;
   geminiOutputTokens: number;
 };
@@ -64,154 +61,28 @@ function emptyUsageResult(
     instances: [],
     confidenceFlags: [],
     verificationCalls: 0,
-    geminiRegionCalls: 0,
-    regionProposals: 0,
-    annotationStyle: envConfig.SEG_ENABLED ? "mask_overlay" : "bbox_overlay",
+    annotationStyle: "bbox_overlay",
     geminiInputTokens: 0,
     geminiOutputTokens: 0,
     ...overrides,
   };
 }
 
-async function processImageSegPath(
-  processed: Awaited<ReturnType<typeof downloadImage>>,
-  input: DamageAssessmentRequest["images"][0],
-  surveyId: string,
+function withOutcome(
   base: ImageResult,
-): Promise<ProcessImageResult> {
-  const confidenceFlags: string[] = [];
-  const usageTracker = new GeminiUsageTracker();
-  let geminiRegionCalls = 0;
-
-  const viewResult = await detectView(
-    processed.buffer,
-    processed.mimeType,
-    input.declared_view,
-  );
-  usageTracker.add(viewResult.usage);
-  geminiRegionCalls += 1;
-
-  if (viewResult.image_quality === "INVALID_IMAGE") {
-    return emptyUsageResult(
-      {
-        ...base,
-        processing_status: "INVALID_IMAGE",
-        image_quality: { status: "INVALID_IMAGE" },
-        view_angle: viewResult.view_angle,
-        damages: [],
-      },
-      {
-        confidenceFlags,
-        geminiRegionCalls: 1,
-        annotationStyle: "mask_overlay",
-        geminiInputTokens: usageTracker.inputTokens,
-        geminiOutputTokens: usageTracker.outputTokens,
-      },
-    );
-  }
-
-  const embedding = await encodeImage(processed.buffer);
-  const proposals = await proposeRegions(
-    processed.buffer,
-    processed.width,
-    processed.height,
-  );
-
-  const decoded: SegmentationMask[] = [];
-  for (const proposal of proposals) {
-    const decodedMask = await decodeMask(embedding, proposal);
-    decoded.push({
-      proposal,
-      mask: decodedMask.mask,
-      width: decodedMask.width,
-      height: decodedMask.height,
-      samIoU: decodedMask.samIoU,
-      envelope: decodedMask.envelope,
-    });
-  }
-
-  const filteredMasks = filterSegmentationMasks(decoded);
-
-  const maskDamages: MaskAnnotatedDamage[] = [];
-  let instanceIndex = 0;
-  for (const segMask of filteredMasks) {
-    geminiRegionCalls += 1;
-    const judged = await judgeRegion(
-      processed.buffer,
-      processed.width,
-      processed.height,
-      segMask,
-      input.image_id,
-      ++instanceIndex,
-      viewResult.view_angle,
-      input.declared_view,
-    );
-    usageTracker.add(judged.usage);
-    if (judged.damage) maskDamages.push(judged.damage);
-  }
-
-  let instances: DamageInstance[] = maskDamages;
-  instances = filterGroundReject(instances);
-  instances = filterBboxSanity(instances);
-  const severityResult = applySeveritySanity(instances);
-  instances = severityResult.instances;
-  confidenceFlags.push(...severityResult.flags);
-  instances = dedupeInstances(instances);
-
-  confidenceFlags.push(...applyConfidenceGate(instances));
-
-  const maskInstances = maskDamages.filter((m) =>
-    instances.some((i) => i.instance_id === m.instance_id),
-  );
-
-  let annotatedUrl: string | null = null;
-  try {
-    if (maskInstances.length > 0) {
-      const annotated = await renderMaskAnnotation(
-        processed.buffer,
-        maskInstances,
-        processed.width,
-        processed.height,
-      );
-      const key = buildAnnotatedKey(surveyId, input.image_id);
-      annotatedUrl = await uploadAnnotatedImage(key, annotated);
-    }
-  } catch (annErr) {
-    logger.warn(
-      {
-        image_id: input.image_id,
-        message: annErr instanceof Error ? annErr.message : annErr,
-      },
-      "mask annotation failed",
-    );
-  }
-
-  const processing_status =
-    instances.length === 0
-      ? "COMPLETED"
-      : annotatedUrl
-        ? "COMPLETED"
-        : "PARTIAL";
-
-  return {
-    imageResult: {
+  code: ImageErrorCode,
+  status: string,
+  overrides: Partial<ProcessImageResult> = {},
+): ProcessImageResult {
+  return emptyUsageResult(
+    {
       ...base,
-      view_angle: viewResult.view_angle,
-      view_confidence: viewResult.view_confidence,
-      view_conflict: viewResult.view_conflict,
-      processing_status,
-      damages: instances,
-      annotated_image_url: annotatedUrl,
+      processing_status: status,
+      error_code: code,
+      user_message: outcomeMessage(code),
     },
-    instances,
-    confidenceFlags,
-    verificationCalls: 0,
-    geminiRegionCalls,
-    regionProposals: proposals.length,
-    annotationStyle: "mask_overlay",
-    geminiInputTokens: usageTracker.inputTokens,
-    geminiOutputTokens: usageTracker.outputTokens,
-  };
+    overrides,
+  );
 }
 
 export async function processImage(
@@ -272,54 +143,173 @@ export async function processImage(
 
     const quality = await assessQuality(processed.buffer);
     if (quality.status === "LOW_QUALITY") {
-      return emptyUsageResult({
-        ...base,
-        processing_status: "REVIEW_REQUIRED",
-        image_quality: { status: "LOW_QUALITY", reason: quality.reason },
-        view_angle: "Unknown",
-        damages: [],
-      });
+      return withOutcome(
+        {
+          ...base,
+          image_quality: { status: "LOW_QUALITY", reason: quality.reason },
+          view_angle: "Unknown",
+        },
+        "LOW_QUALITY",
+        "REVIEW_REQUIRED",
+      );
     }
 
-    if (envConfig.SEG_ENABLED) {
-      return processImageSegPath(processed, input, surveyId, base);
+    let gateViewAngle = input.declared_view as ImageResult["view_angle"] | undefined;
+    let vehicleBbox: number[] | undefined;
+
+    if (envConfig.IMAGE_GATE_ENABLED) {
+      try {
+        const gate = await runImageGate(
+          processed.buffer,
+          processed.mimeType,
+          input.declared_view,
+        );
+        usageTracker.add(gate.usage);
+        gateViewAngle = gate.view_angle;
+        vehicleBbox = gate.vehicle_bbox;
+
+        if (!gate.is_vehicle || gate.image_quality === "INVALID_IMAGE") {
+          confidenceFlags.push(`image:${input.image_id}:NOT_VEHICLE`);
+          return withOutcome(
+            {
+              ...base,
+              view_angle: gate.view_angle,
+              view_confidence: gate.view_confidence,
+              image_quality: { status: "INVALID_IMAGE" },
+            },
+            gate.is_vehicle ? "UNREADABLE_DOCUMENT" : "NOT_VEHICLE",
+            "INVALID_IMAGE",
+            {
+              confidenceFlags,
+              geminiInputTokens: usageTracker.inputTokens,
+              geminiOutputTokens: usageTracker.outputTokens,
+            },
+          );
+        }
+
+        if (gate.image_quality === "LOW_QUALITY" || gate.image_quality === "LOW_RESOLUTION") {
+          return withOutcome(
+            {
+              ...base,
+              view_angle: gate.view_angle,
+              view_confidence: gate.view_confidence,
+              image_quality: { status: gate.image_quality },
+            },
+            "LOW_QUALITY",
+            "REVIEW_REQUIRED",
+            {
+              confidenceFlags,
+              geminiInputTokens: usageTracker.inputTokens,
+              geminiOutputTokens: usageTracker.outputTokens,
+            },
+          );
+        }
+      } catch (err) {
+        if (err instanceof GeminiCallError) {
+          logger.warn(
+            { image_id: input.image_id, err },
+            "image gate failed; continuing without gate",
+          );
+          confidenceFlags.push(`image:${input.image_id}:GATE_SKIPPED`);
+          gateViewAngle = (input.declared_view as ImageResult["view_angle"]) ?? "Unknown";
+          vehicleBbox = undefined;
+        } else {
+          throw err;
+        }
+      }
     }
 
-    const mapped = await detectDamage(
-      processed.buffer,
-      processed.mimeType,
-      input.image_id,
-      input.declared_view,
-    );
+    const mapped = await detectDamage(processed.buffer, processed.mimeType, input.image_id, {
+      declaredView: input.declared_view,
+      gateViewAngle: gateViewAngle,
+    });
     usageTracker.add(mapped.usage);
 
     if (mapped.image_quality === "INVALID_IMAGE") {
-      return emptyUsageResult({
-        ...base,
-        processing_status: "INVALID_IMAGE",
-        image_quality: { status: "INVALID_IMAGE" },
-        view_angle: mapped.view_angle,
-        damages: [],
-      }, {
-        confidenceFlags,
-        annotationStyle: "bbox_overlay",
-        geminiInputTokens: usageTracker.inputTokens,
-        geminiOutputTokens: usageTracker.outputTokens,
-      });
+      confidenceFlags.push(`image:${input.image_id}:UNREADABLE_DOCUMENT`);
+      return withOutcome(
+        {
+          ...base,
+          view_angle: mapped.view_angle,
+          view_confidence: mapped.view_confidence,
+          image_quality: { status: "INVALID_IMAGE" },
+        },
+        "UNREADABLE_DOCUMENT",
+        "INVALID_IMAGE",
+        {
+          confidenceFlags,
+          geminiInputTokens: usageTracker.inputTokens,
+          geminiOutputTokens: usageTracker.outputTokens,
+        },
+      );
     }
 
     let instances = mapped.instances;
+    instances = filterOutsideVehicleBBox(
+      instances,
+      vehicleBbox,
+      envConfig.BBOX_MIN_VEHICLE_INSIDE_RATIO,
+      envConfig.BBOX_VEHICLE_TRIM_BOTTOM,
+    );
     instances = filterGroundReject(instances);
+    instances = filterPartSpatialSanity(instances, mapped.view_angle);
     instances = filterBboxSanity(instances);
     const severityResult = applySeveritySanity(instances);
     instances = severityResult.instances;
     confidenceFlags.push(...severityResult.flags);
     instances = dedupeInstances(instances);
 
-    const verified: DamageInstance[] = [];
+    if (instances.length === 0) {
+      confidenceFlags.push(`image:${input.image_id}:NO_DAMAGE_FOUND`);
+      return {
+        imageResult: {
+          ...base,
+          view_angle: mapped.view_angle,
+          view_confidence: mapped.view_confidence,
+          view_conflict: mapped.view_conflict,
+          processing_status: "REVIEW_REQUIRED",
+          error_code: "NO_DAMAGE_FOUND",
+          user_message: outcomeMessage("NO_DAMAGE_FOUND"),
+          damages: [],
+          annotated_image_url: null,
+        },
+        instances: [],
+        confidenceFlags,
+        verificationCalls,
+        annotationStyle: "bbox_overlay",
+        geminiInputTokens: usageTracker.inputTokens,
+        geminiOutputTokens: usageTracker.outputTokens,
+      };
+    }
+
+    const displayDamages: DamageInstance[] = [];
+    const clusterInstances: DamageInstance[] = [];
+
     for (const inst of instances) {
       if (inst.confidence >= envConfig.CONFIDENCE_ACCEPT_MIN) {
-        verified.push(inst);
+        if (isBorderlineGroundAdjacentBox(inst.bounding_box)) {
+          verificationCalls += 1;
+          const result = await verifyDamageFinding(processed.buffer, inst);
+          usageTracker.add(result.usage);
+          if (result.confirmed) {
+            const confirmed = {
+              ...inst,
+              confidence: result.confidence,
+              verification_status: "confirmed" as const,
+            };
+            displayDamages.push(confirmed);
+            clusterInstances.push(confirmed);
+          } else {
+            confidenceFlags.push(`verification_failed:${inst.instance_id}`);
+            displayDamages.push({
+              ...inst,
+              verification_status: "pending_review" as const,
+            });
+          }
+          continue;
+        }
+        displayDamages.push(inst);
+        clusterInstances.push(inst);
         continue;
       }
       if (
@@ -330,36 +320,51 @@ export async function processImage(
         const result = await verifyDamageFinding(processed.buffer, inst);
         usageTracker.add(result.usage);
         if (result.confirmed) {
-          verified.push({
+          const confirmed = {
             ...inst,
             confidence: result.confidence,
-            verification_status: "confirmed",
-          });
+            verification_status: "confirmed" as const,
+          };
+          displayDamages.push(confirmed);
+          clusterInstances.push(confirmed);
         } else {
           confidenceFlags.push(`verification_failed:${inst.instance_id}`);
-          verified.push({
+          const pending = {
             ...inst,
-            verification_status: "pending_review",
-          });
+            verification_status: "pending_review" as const,
+          };
+          displayDamages.push(pending);
         }
         continue;
       }
       confidenceFlags.push(`low_confidence:${inst.instance_id}`);
-      verified.push(inst);
+      displayDamages.push({
+        ...inst,
+        verification_status: "pending_review",
+      });
     }
-    instances = verified;
 
-    confidenceFlags.push(...applyConfidenceGate(instances));
+    confidenceFlags.push(...applyConfidenceGate(displayDamages));
 
     let annotatedUrl: string | null = null;
+    const annotatable = clusterInstances.filter(isClusterEligible);
     try {
-      if (instances.length > 0) {
-        const annotated = await renderAnnotation(
-          processed.buffer,
-          instances,
-          processed.width,
-          processed.height,
+      if (annotatable.length > 0) {
+        const annotatedVision = await renderAnnotation(
+          mapped.vision.buffer,
+          annotatable,
+          mapped.vision.width,
+          mapped.vision.height,
         );
+        const annotated =
+          mapped.vision.width === processed.width &&
+          mapped.vision.height === processed.height
+            ? annotatedVision
+            : await upscaleImage(
+                annotatedVision,
+                processed.width,
+                processed.height,
+              );
         const key = buildAnnotatedKey(surveyId, input.image_id);
         annotatedUrl = await uploadAnnotatedImage(key, annotated);
       }
@@ -373,12 +378,28 @@ export async function processImage(
       );
     }
 
-    const processing_status =
-      instances.length === 0
-        ? "COMPLETED"
-        : annotatedUrl
-          ? "COMPLETED"
-          : "PARTIAL";
+    if (clusterInstances.length === 0) {
+      const processing_status = "REVIEW_REQUIRED";
+      return {
+        imageResult: {
+          ...base,
+          view_angle: mapped.view_angle,
+          view_confidence: mapped.view_confidence,
+          view_conflict: mapped.view_conflict,
+          processing_status,
+          damages: displayDamages,
+          annotated_image_url: annotatedUrl,
+        },
+        instances: [],
+        confidenceFlags,
+        verificationCalls,
+        annotationStyle: "bbox_overlay",
+        geminiInputTokens: usageTracker.inputTokens,
+        geminiOutputTokens: usageTracker.outputTokens,
+      };
+    }
+
+    const processing_status = annotatedUrl ? "COMPLETED" : "PARTIAL";
 
     return {
       imageResult: {
@@ -387,24 +408,31 @@ export async function processImage(
         view_confidence: mapped.view_confidence,
         view_conflict: mapped.view_conflict,
         processing_status,
-        damages: instances,
+        damages: displayDamages,
         annotated_image_url: annotatedUrl,
       },
-      instances,
+      instances: clusterInstances.filter(isClusterEligible),
       confidenceFlags,
       verificationCalls,
-      geminiRegionCalls: 0,
-      regionProposals: 0,
       annotationStyle: "bbox_overlay",
       geminiInputTokens: usageTracker.inputTokens,
       geminiOutputTokens: usageTracker.outputTokens,
     };
   } catch (err) {
     logger.error({ err, image_id: input.image_id }, "image processing failed");
+    if (err instanceof GeminiCallError) {
+      return withOutcome(
+        { ...base, view_angle: "Unknown" },
+        "GEMINI_CALL_FAILED",
+        "FAILED",
+        { confidenceFlags },
+      );
+    }
     return emptyUsageResult({
       ...base,
       processing_status: "FAILED",
-      error_code: err instanceof Error ? err.message : "ANALYSIS_FAILED",
+      error_code: "GEMINI_CALL_FAILED",
+      user_message: outcomeMessage("GEMINI_CALL_FAILED"),
       view_angle: "Unknown",
     }, { confidenceFlags });
   }

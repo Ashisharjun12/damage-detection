@@ -1,19 +1,19 @@
-import CircuitBreaker from "opossum";
-import {
-  getGeminiClient,
-  GEMINI_DAMAGE_RESPONSE_SCHEMA,
-  withRetry,
-} from "@/infrastructure/gemini/client.js";
+import { getGeminiClient, GEMINI_DAMAGE_RESPONSE_SCHEMA } from "@/infrastructure/gemini/client.js";
 import {
   buildDamageUserPrompt,
   buildVerificationPrompt,
+  buildDamageSystemPrompt,
   DAMAGE_DETECTION_PROMPT_VERSION,
-  DAMAGE_DETECTION_SYSTEM,
 } from "@/infrastructure/gemini/prompts/damage-detection.js";
 import {
   geminiResponseSchema,
   type GeminiParsedResponse,
 } from "@/infrastructure/gemini/schemas/damage-response.schema.js";
+import {
+  callWithGeminiRetry,
+  withGeminiTimeout,
+} from "@/infrastructure/gemini/retry-policy.js";
+import { parseGeminiResponse } from "@/infrastructure/gemini/parse-response.js";
 import {
   extractGeminiUsage,
   type GeminiCallResult,
@@ -34,58 +34,48 @@ export interface DamageDetectionProvider {
   detect(input: DamageDetectionInput): Promise<GeminiCallResult<GeminiParsedResponse>>;
 }
 
-const BREAKER_OPTIONS = {
-  timeout: 90000,
-  errorThresholdPercentage: 50,
-  resetTimeout: 30000,
-};
-
-async function callGemini(
+async function callGeminiDamageOnce(
   input: DamageDetectionInput,
+  strictJson = false,
 ): Promise<GeminiCallResult<GeminiParsedResponse>> {
   const client = getGeminiClient();
   const userText = input.verificationSummary
     ? buildVerificationPrompt(input.verificationSummary)
     : buildDamageUserPrompt(input.declaredView, input.viewAwareParts);
 
-  const response = await client.models.generateContent({
-    model: envConfig.AI_MODEL,
-    contents: [
-      {
-        inlineData: {
-          mimeType: input.mimeType,
-          data: input.imageBytes.toString("base64"),
+  const response = await withGeminiTimeout(
+    client.models.generateContent({
+      model: envConfig.AI_MODEL,
+      contents: [
+        {
+          inlineData: {
+            mimeType: input.mimeType,
+            data: input.imageBytes.toString("base64"),
+          },
         },
+        { text: userText },
+      ],
+      config: {
+        systemInstruction: buildDamageSystemPrompt(strictJson),
+        temperature: envConfig.GEMINI_TEMPERATURE,
+        maxOutputTokens: envConfig.GEMINI_MAX_OUTPUT_TOKENS,
+        responseMimeType: "application/json",
+        responseSchema: GEMINI_DAMAGE_RESPONSE_SCHEMA,
       },
-      { text: userText },
-    ],
-    config: {
-      systemInstruction: DAMAGE_DETECTION_SYSTEM,
-      temperature: envConfig.GEMINI_TEMPERATURE,
-      maxOutputTokens: envConfig.GEMINI_MAX_OUTPUT_TOKENS,
-      responseMimeType: "application/json",
-      responseSchema: GEMINI_DAMAGE_RESPONSE_SCHEMA,
-    },
-  });
+    }),
+  );
 
-  const text = response.text;
-  if (!text) throw new Error("Empty Gemini response");
-  const parsed = geminiResponseSchema.parse(JSON.parse(text));
+  const parsed = parseGeminiResponse(response, geminiResponseSchema);
   return { data: parsed, usage: extractGeminiUsage(response) };
-}
-
-function createBreaker(fn: typeof callGemini) {
-  return new CircuitBreaker(fn, BREAKER_OPTIONS);
 }
 
 export class GeminiDamageProvider implements DamageDetectionProvider {
   async detect(
     input: DamageDetectionInput,
   ): Promise<GeminiCallResult<GeminiParsedResponse>> {
-    return withRetry(async () => {
-      const breaker = createBreaker(callGemini);
-      return breaker.fire(input);
-    });
+    return callWithGeminiRetry(async ({ strictJson }) =>
+      callGeminiDamageOnce(input, strictJson),
+    );
   }
 }
 

@@ -43,3 +43,32 @@ cd test-web && npm run dev
 
 - damage-ai: `GET http://localhost:3000/health`
 - test-backend: `GET http://localhost:3001/health`
+
+## Docker (full stack)
+
+Runs **redis**, **mongo**, **damage-ai** API, **damage-ai-worker**, **test-backend**, and **test-web** (nginx on port 80).
+
+```bash
+# From repo root
+cp .env.example .env
+# Edit .env: AI_API_KEY, R2_*, JWT_SECRET, WEBHOOK_SECRET
+
+docker compose up -d --build
+```
+
+| Service | Image / build | Host port |
+|---------|---------------|-----------|
+| test-web | `./test-web` | `${WEB_PORT:-80}` |
+| damage-ai | `./damage-ai` | `${DAMAGE_AI_PORT:-3000}` |
+| damage-ai-worker | same as damage-ai | (internal) |
+| test-backend | `./test-backend` | via nginx `/api` only |
+| redis | `redis:7-alpine` | internal |
+| mongo | `mongo:7` | internal |
+
+- UI: `http://localhost` (or `PUBLIC_URL`)
+- damage-ai API: `http://localhost:3000`
+- Rebuild after code changes: `docker compose up -d --build`
+- Logs: `docker compose logs -f damage-ai damage-ai-worker test-backend`
+- Stop: `docker compose down`
+
+**Linode / production:** set `PUBLIC_URL`, `CORS_ORIGIN`, and use external `REDIS_URL` (rediss) if not using bundled redis. Omit `redis` service or point `REDIS_URL` at Upstash.

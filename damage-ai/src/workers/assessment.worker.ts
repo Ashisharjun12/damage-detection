@@ -2,7 +2,6 @@ import { Worker } from "bullmq";
 import { Redis } from "ioredis";
 import { envConfig } from "@/config/env.js";
 import { assertR2Configured } from "@/infrastructure/storage/r2.client.js";
-import { loadSamSessions, modelsAvailable } from "@/modules/spatial/mobile-sam/ort-session.js";
 import { runAssessment } from "@/pipeline/run-assessment.js";
 import { logger } from "@/shared/logger.js";
 import type { DamageAssessmentRequest } from "@/types/m02.v1.js";
@@ -18,18 +17,6 @@ if (!envConfig.REDIS_URL) {
       { message: r2Err instanceof Error ? r2Err.message : r2Err },
       "R2 not configured — annotated uploads will fail",
     );
-  }
-
-  if (envConfig.SEG_ENABLED) {
-    if (modelsAvailable()) {
-      loadSamSessions()
-        .then(() => logger.info("MobileSAM sessions preloaded"))
-        .catch((err) =>
-          logger.error({ err }, "MobileSAM preload failed — seg path may error"),
-        );
-    } else {
-      logger.error("SEG_ENABLED but MobileSAM ONNX models missing");
-    }
   }
 
   const connection = new Redis(envConfig.REDIS_URL, {

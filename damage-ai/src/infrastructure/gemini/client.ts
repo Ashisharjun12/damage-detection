@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { envConfig } from "@/config/env.js";
-import { logger } from "@/shared/logger.js";
+import { callWithGeminiRetry } from "@/infrastructure/gemini/retry-policy.js";
 
 let ai: GoogleGenAI | null = null;
 
@@ -75,16 +75,6 @@ export async function sleep(ms: number) {
   await new Promise((r) => setTimeout(r, ms));
 }
 
-export async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
-  let lastErr: unknown;
-  for (let i = 0; i < retries; i++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastErr = err;
-      logger.warn({ err, attempt: i + 1 }, "gemini retry");
-      if (i < retries - 1) await sleep(1000 * 2 ** i);
-    }
-  }
-  throw lastErr;
+export async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  return callWithGeminiRetry(async () => fn());
 }

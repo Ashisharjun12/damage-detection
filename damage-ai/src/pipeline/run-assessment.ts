@@ -17,7 +17,6 @@ import { buildReviewFlags } from "@/modules/review/review-flags.js";
 import type { DuplicateRecord } from "@/modules/duplicate/find-duplicate.js";
 import type { DamageAssessmentRequest, M02Report } from "@/types/m02.v1.js";
 import { DAMAGE_DETECTION_PROMPT_VERSION } from "@/infrastructure/gemini/damage-provider.js";
-import { GROUNDED_DAMAGE_PROMPT_VERSION } from "@/infrastructure/gemini/prompts/grounded-damage.js";
 import { logger } from "@/shared/logger.js";
 
 async function runPool<T, R>(
@@ -61,14 +60,6 @@ export async function runAssessment(
     (sum, r) => sum + r.verificationCalls,
     0,
   );
-  const totalGeminiRegionCalls = imageResults.reduce(
-    (sum, r) => sum + r.geminiRegionCalls,
-    0,
-  );
-  const totalRegionProposals = imageResults.reduce(
-    (sum, r) => sum + r.regionProposals,
-    0,
-  );
   const totalGeminiInputTokens = imageResults.reduce(
     (sum, r) => sum + r.geminiInputTokens,
     0,
@@ -77,9 +68,6 @@ export async function runAssessment(
     (sum, r) => sum + r.geminiOutputTokens,
     0,
   );
-  const annotationStyle = envConfig.SEG_ENABLED
-    ? "mask_overlay"
-    : imageResults[0]?.annotationStyle ?? "bbox_overlay";
 
   const latencyMs = Date.now() - start;
   const latencySec = Math.round(latencyMs / 100) / 10;
@@ -129,20 +117,15 @@ export async function runAssessment(
     review,
     processing: {
       model: envConfig.AI_MODEL,
-      prompt_version: envConfig.SEG_ENABLED
-        ? GROUNDED_DAMAGE_PROMPT_VERSION
-        : DAMAGE_DETECTION_PROMPT_VERSION,
+      prompt_version: DAMAGE_DETECTION_PROMPT_VERSION,
       latency_ms: latencyMs,
       latency_sec: latencySec,
       images_processed: images.filter((i) => i.processing_status === "COMPLETED").length,
       images_skipped: images.filter((i) => i.processing_status === "SKIPPED_DUPLICATE").length,
       idempotency_key: request.idempotency_key,
-      spatial_model: envConfig.SEG_ENABLED ? "mobile-sam-v1" : null,
-      annotation_style: annotationStyle,
+      annotation_style: "bbox_overlay",
       gemini_image_max_edge: envConfig.GEMINI_IMAGE_MAX_EDGE,
       verification_calls: totalVerificationCalls,
-      region_proposals: envConfig.SEG_ENABLED ? totalRegionProposals : undefined,
-      gemini_region_calls: envConfig.SEG_ENABLED ? totalGeminiRegionCalls : undefined,
       gemini_input_tokens: totalGeminiInputTokens,
       gemini_output_tokens: totalGeminiOutputTokens,
       estimated_cost_usd: cost?.estimated_cost_usd,

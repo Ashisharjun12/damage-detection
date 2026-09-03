@@ -16,6 +16,12 @@ import { SurveyImageTable } from '@/components/SurveyImageTable';
 import { SurveyResultsTable } from '@/components/SurveyResultsTable';
 import { assessSurvey, getSurvey, isTerminalStatus } from '@/api/client';
 import { normalizeM02Report } from '@/lib/normalizeM02Report';
+import {
+  formatInr,
+  formatTokenCount,
+  formatUsd,
+  getGeminiCostSummary,
+} from '@/lib/geminiCost';
 
 const POLL_MS = 2000;
 
@@ -152,6 +158,7 @@ export function SurveyDetailPage() {
   };
 
   const report = normalizeM02Report(data?.report);
+  const costSummary = getGeminiCostSummary(report?.processing);
   const status = data?.status;
   const canStart =
     data &&
@@ -245,7 +252,7 @@ export function SurveyDetailPage() {
           </TabsList>
 
           <TabsContent value="results" className="mt-4 space-y-6">
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -285,7 +292,59 @@ export function SurveyDetailPage() {
                   )}
                 </CardContent>
               </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Gemini cost
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {costSummary ? (
+                    <>
+                      <p className="text-2xl font-bold">{formatInr(costSummary.inr)}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {formatUsd(costSummary.usd)}
+                      </p>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {formatTokenCount(costSummary.inputTokens)} in ·{' '}
+                        {formatTokenCount(costSummary.outputTokens)} out ·{' '}
+                        {formatTokenCount(costSummary.totalTokens)} total tokens
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-lg font-semibold">—</p>
+                  )}
+                </CardContent>
+              </Card>
             </div>
+
+            {costSummary && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Processing</CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                  <p>
+                    <span className="text-muted-foreground">Model: </span>
+                    {report.processing?.model ?? '—'}
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">Prompt: </span>
+                    {report.processing?.prompt_version ?? '—'}
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">Latency: </span>
+                    {report.processing?.latency_sec != null
+                      ? `${report.processing.latency_sec}s`
+                      : '—'}
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">Verification calls: </span>
+                    {report.processing?.verification_calls ?? 0}
+                  </p>
+                </CardContent>
+              </Card>
+            )}
 
             <Card>
               <CardHeader>

@@ -10,8 +10,6 @@ COPY package.json ./
 RUN npm install --omit=dev --no-audit --no-fund
 
 COPY tsconfig.json ./
-COPY scripts ./scripts
-COPY models ./models
 COPY src ./src
 
 ENV NODE_ENV=production
