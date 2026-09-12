@@ -1,6 +1,6 @@
 const USD_PER_M_INPUT = 0.3;
 const USD_PER_M_OUTPUT = 2.5;
-const INR_PER_USD = 94;
+const INR_PER_USD = 95.56;
 
 function computeFromTokens(inputTokens, outputTokens) {
   const inputUsd = (inputTokens / 1_000_000) * USD_PER_M_INPUT;

@@ -1,10 +1,13 @@
 import App from "@/app.js";
 import { envConfig } from "@/config/env.js";
+import { logGeminiConfigOnStartup } from "@/infrastructure/gemini/gemini-config.js";
 import { assertR2Configured } from "@/infrastructure/storage/r2.client.js";
 import { logger } from "@/shared/logger.js";
 
 const start = async () => {
   try {
+    logGeminiConfigOnStartup("damage-ai-server");
+
     try {
       assertR2Configured();
       logger.info("R2 configured for annotated image uploads");

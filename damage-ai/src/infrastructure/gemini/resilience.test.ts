@@ -1,12 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  classifyGeminiError,
   GeminiCallError,
   isJsonParseError,
   isRateLimitError,
   isRetryableGeminiError,
   isTimeoutError,
 } from "@/infrastructure/gemini/retry-policy.js";
+import { getGeminiConfigSummary } from "@/infrastructure/gemini/gemini-config.js";
 import { isClusterEligible } from "@/modules/detection/detect-damage.js";
 import { clusterDamages } from "@/modules/aggregation/cluster-damages.js";
 import { filterOutsideVehicleBBox } from "@/modules/spatial/bbox.js";
@@ -35,6 +37,26 @@ describe("retry-policy classifiers", () => {
     const err = new GeminiCallError("failed");
     assert.equal(err.code, "GEMINI_CALL_FAILED");
   });
+
+  it("classifies gemini error types", () => {
+    assert.equal(classifyGeminiError({ status: 401 }), "auth");
+    assert.equal(classifyGeminiError({ status: 429 }), "rate_limit");
+    assert.equal(classifyGeminiError(new Error("GEMINI_TIMEOUT")), "timeout");
+    assert.equal(classifyGeminiError(new Error("Empty Gemini response")), "empty_response");
+    assert.equal(classifyGeminiError(new SyntaxError("Unexpected token")), "json_parse");
+  });
+});
+
+describe("gemini config summary", () => {
+  it("reports configured state without exposing full key", () => {
+    const summary = getGeminiConfigSummary();
+    assert.equal(typeof summary.configured, "boolean");
+    assert.equal(typeof summary.model, "string");
+    if (summary.configured) {
+      assert.ok(summary.keyPrefix);
+      assert.ok(summary.keyLength > 0);
+    }
+  });
 });
 
 describe("isClusterEligible", () => {
@@ -42,8 +64,8 @@ describe("isClusterEligible", () => {
     instance_id: "img_D001",
     image_id: "img",
     part_name: "Front Bumper",
-    damage_type: "Scratch",
-    severity: "Minor",
+    damage_type: "Dent",
+    severity: "Moderate",
     recommendation: "Repair",
     bounding_box: { x_min: 0.2, y_min: 0.5, x_max: 0.4, y_max: 0.6 },
     confidence: 0.95,
@@ -74,8 +96,8 @@ describe("clusterDamages", () => {
         instance_id: "a",
         image_id: "i1",
         part_name: "Front Bumper",
-        damage_type: "Scratch",
-        severity: "Minor",
+        damage_type: "Dent",
+        severity: "Moderate",
         recommendation: "Repair",
         bounding_box: { x_min: 0.1, y_min: 0.5, x_max: 0.2, y_max: 0.6 },
         confidence: 0.95,
@@ -86,8 +108,8 @@ describe("clusterDamages", () => {
         instance_id: "b",
         image_id: "i1",
         part_name: "Front Bumper",
-        damage_type: "Scratch",
-        severity: "Minor",
+        damage_type: "Dent",
+        severity: "Moderate",
         recommendation: "Repair",
         bounding_box: { x_min: 0.1, y_min: 0.5, x_max: 0.2, y_max: 0.6 },
         confidence: 0.4,

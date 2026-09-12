@@ -4,7 +4,10 @@ import {
   uploadAnnotatedImage,
 } from "@/infrastructure/storage/r2.client.js";
 import { GeminiUsageTracker } from "@/infrastructure/gemini/usage.js";
-import { GeminiCallError } from "@/infrastructure/gemini/retry-policy.js";
+import {
+  classifyGeminiError,
+  GeminiCallError,
+} from "@/infrastructure/gemini/retry-policy.js";
 import { downloadImage } from "@/modules/ingest/download-image.js";
 import { upscaleImage } from "@/modules/ingest/resize-image.js";
 import {
@@ -32,6 +35,7 @@ import {
   applySeveritySanity,
   dedupeInstances,
   filterBboxSanity,
+  filterCosmeticMinor,
 } from "@/modules/validation/validate-bbox.js";
 import { renderAnnotation } from "@/modules/annotation/render-annotation.js";
 import type {
@@ -207,7 +211,12 @@ export async function processImage(
       } catch (err) {
         if (err instanceof GeminiCallError) {
           logger.warn(
-            { image_id: input.image_id, err },
+            {
+              image_id: input.image_id,
+              err,
+              errorType: classifyGeminiError(err),
+              apiKeyConfigured: Boolean(envConfig.AI_API_KEY),
+            },
             "image gate failed; continuing without gate",
           );
           confidenceFlags.push(`image:${input.image_id}:GATE_SKIPPED`);
@@ -254,6 +263,9 @@ export async function processImage(
     instances = filterGroundReject(instances);
     instances = filterPartSpatialSanity(instances, mapped.view_angle);
     instances = filterBboxSanity(instances);
+    const cosmeticResult = filterCosmeticMinor(instances);
+    instances = cosmeticResult.instances;
+    confidenceFlags.push(...cosmeticResult.flags);
     const severityResult = applySeveritySanity(instances);
     instances = severityResult.instances;
     confidenceFlags.push(...severityResult.flags);
@@ -419,7 +431,16 @@ export async function processImage(
       geminiOutputTokens: usageTracker.outputTokens,
     };
   } catch (err) {
-    logger.error({ err, image_id: input.image_id }, "image processing failed");
+    logger.error(
+      {
+        err,
+        image_id: input.image_id,
+        errorType: classifyGeminiError(err),
+        apiKeyConfigured: Boolean(envConfig.AI_API_KEY),
+        model: envConfig.AI_MODEL,
+      },
+      "image processing failed",
+    );
     if (err instanceof GeminiCallError) {
       return withOutcome(
         { ...base, view_angle: "Unknown" },

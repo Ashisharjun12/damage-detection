@@ -20,6 +20,7 @@ import {
 } from "@/infrastructure/gemini/usage.js";
 import { envConfig } from "@/config/env.js";
 import type { ViewAngle } from "@/types/m02.v1.js";
+import { logger } from "@/shared/logger.js";
 
 export type DamageDetectionInput = {
   imageBytes: Buffer;
@@ -39,9 +40,23 @@ async function callGeminiDamageOnce(
   strictJson = false,
 ): Promise<GeminiCallResult<GeminiParsedResponse>> {
   const client = getGeminiClient();
+  const operation = input.verificationSummary ? "verify" : "detect";
   const userText = input.verificationSummary
     ? buildVerificationPrompt(input.verificationSummary)
     : buildDamageUserPrompt(input.declaredView, input.viewAwareParts);
+
+  logger.debug(
+    {
+      operation,
+      model: envConfig.AI_MODEL,
+      strictJson,
+      imageBytes: input.imageBytes.length,
+      mimeType: input.mimeType,
+      declaredView: input.declaredView,
+      apiKeyConfigured: Boolean(envConfig.AI_API_KEY),
+    },
+    "gemini damage call start",
+  );
 
   const response = await withGeminiTimeout(
     client.models.generateContent({
@@ -66,7 +81,19 @@ async function callGeminiDamageOnce(
   );
 
   const parsed = parseGeminiResponse(response, geminiResponseSchema);
-  return { data: parsed, usage: extractGeminiUsage(response) };
+  const usage = extractGeminiUsage(response);
+  logger.debug(
+    {
+      operation,
+      model: envConfig.AI_MODEL,
+      damageCount: parsed.damages.length,
+      viewAngle: parsed.view_angle,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+    },
+    "gemini damage call ok",
+  );
+  return { data: parsed, usage };
 }
 
 export class GeminiDamageProvider implements DamageDetectionProvider {

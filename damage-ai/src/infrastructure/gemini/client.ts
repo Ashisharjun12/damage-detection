@@ -1,10 +1,16 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { envConfig } from "@/config/env.js";
 import { callWithGeminiRetry } from "@/infrastructure/gemini/retry-policy.js";
+import { logger } from "@/shared/logger.js";
 
 let ai: GoogleGenAI | null = null;
+let missingKeyWarned = false;
 
 export function getGeminiClient(): GoogleGenAI {
+  if (!envConfig.AI_API_KEY && !missingKeyWarned) {
+    missingKeyWarned = true;
+    logger.warn("AI_API_KEY is empty — Gemini API calls will fail");
+  }
   if (!ai) {
     ai = new GoogleGenAI({ apiKey: envConfig.AI_API_KEY });
   }

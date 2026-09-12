@@ -20,6 +20,7 @@ import {
   geminiDamageProvider,
   type DamageDetectionInput,
 } from "@/infrastructure/gemini/damage-provider.js";
+import { isCosmeticMinorDamage } from "@/infrastructure/gemini/prompts/damage-detection.js";
 
 export type DetectionResult = {
   instances: DamageInstance[];
@@ -141,6 +142,9 @@ export async function verifyDamageFinding(
 }
 
 export function isClusterEligible(instance: DamageInstance): boolean {
+  if (isCosmeticMinorDamage(instance.severity, instance.damage_type)) {
+    return false;
+  }
   return (
     instance.confidence >= envConfig.CONFIDENCE_VERIFY_MIN &&
     instance.verification_status !== "pending_review"

@@ -1,5 +1,6 @@
 import type { DamageInstance, NormalizedBBox } from "@/types/m02.v1.js";
 import { bboxArea } from "@/infrastructure/gemini/bbox.adapter.js";
+import { isCosmeticMinorDamage } from "@/infrastructure/gemini/prompts/damage-detection.js";
 import { bboxIoU } from "@/modules/spatial/iou.js";
 import { recommendForSeverity } from "@/modules/scoring/repair-replace-rules.js";
 import { envConfig } from "@/config/env.js";
@@ -28,6 +29,21 @@ export function filterBboxSanity(instances: DamageInstance[]): DamageInstance[] 
   return instances.filter(
     (inst) => !isOversizedScratchPaintBox(inst.bounding_box, inst.damage_type),
   );
+}
+
+export function filterCosmeticMinor(instances: DamageInstance[]): {
+  instances: DamageInstance[];
+  flags: string[];
+} {
+  const flags: string[] = [];
+  const kept = instances.filter((inst) => {
+    if (isCosmeticMinorDamage(inst.severity, inst.damage_type)) {
+      flags.push(`cosmetic_minor_dropped:${inst.instance_id}`);
+      return false;
+    }
+    return true;
+  });
+  return { instances: kept, flags };
 }
 
 export function applySeveritySanity(instances: DamageInstance[]): {

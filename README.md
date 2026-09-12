@@ -42,7 +42,46 @@ cd test-web && npm run dev
 ## Health checks
 
 - damage-ai: `GET http://localhost:3000/health`
+- damage-ai Gemini ping: `GET http://localhost:3000/health/gemini`
 - test-backend: `GET http://localhost:3001/health`
+
+## Test Gemini API key
+
+Open **`index.html`** in your browser (repo root). Paste your API key, pick **`gemini-3.6-flash`**, click **Test API Key**.
+
+> **Note:** Google no longer offers `gemini-2.5-flash` to new API users (404). Use `gemini-3.6-flash` in `.env`:
+> ```
+> AI_MODEL=gemini-3.6-flash
+> AI_FALLBACK_MODEL=gemini-3.6-flash
+> ```
+
+If the test page works but surveys fail with `GEMINI_CALL_FAILED`, rebuild Docker so the worker picks up `.env`:
+```bash
+docker compose up -d --build
+```
+
+Use **List models** in `index.html` to see which models your API key supports (including Lite variants).
+
+## Which model for damage-ai?
+
+| Model | Cost | Bbox accuracy | Use when |
+|-------|------|---------------|----------|
+| `gemini-3.6-flash` | Medium | Best | Maximum accuracy — Indian survey photos, tight boxes |
+| `gemini-3.5-flash-lite` | Low ($0.30 / $2.50 per 1M) | Good | **Budget default** — better vision than 3.1-lite |
+| `gemini-3.1-flash-lite` | Lowest | Weaker | Cheapest experiments — weak on crash photos |
+| `gemini-2.5-flash` | — | — | Avoid — 404 for new API users |
+
+```env
+# Maximum accuracy
+AI_MODEL=gemini-3.6-flash
+
+# Budget default (repo .env)
+AI_MODEL=gemini-3.5-flash-lite
+GEMINI_USD_PER_M_INPUT=0.30
+GEMINI_USD_PER_M_OUTPUT=2.50
+```
+
+Damage detection uses prompt **v8** (RTO-focused): cosmetic Minor Scratch/Paint Damage is filtered out; Minor Dent/Crack still reported.
 
 ## Docker (full stack)
 

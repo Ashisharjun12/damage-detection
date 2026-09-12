@@ -1,6 +1,7 @@
 import { Worker } from "bullmq";
 import { Redis } from "ioredis";
 import { envConfig } from "@/config/env.js";
+import { logGeminiConfigOnStartup } from "@/infrastructure/gemini/gemini-config.js";
 import { assertR2Configured } from "@/infrastructure/storage/r2.client.js";
 import { runAssessment } from "@/pipeline/run-assessment.js";
 import { logger } from "@/shared/logger.js";
@@ -9,6 +10,8 @@ import type { DamageAssessmentRequest } from "@/types/m02.v1.js";
 if (!envConfig.REDIS_URL) {
   logger.warn("REDIS_URL not set — worker not started");
 } else {
+  logGeminiConfigOnStartup("damage-ai-worker");
+
   try {
     assertR2Configured();
     logger.info("R2 configured for annotated image uploads");

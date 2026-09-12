@@ -20,6 +20,7 @@ import {
   type GeminiCallResult,
 } from "@/infrastructure/gemini/usage.js";
 import { envConfig } from "@/config/env.js";
+import { logger } from "@/shared/logger.js";
 
 export const GEMINI_GATE_RESPONSE_SCHEMA = {
   type: Type.OBJECT,
@@ -65,13 +66,27 @@ async function callGeminiGateOnce(
   strictJson = false,
 ): Promise<GeminiCallResult<GateParsedResponse>> {
   const client = getGeminiClient();
+  const model = resolveGateModel(strictJson);
   const systemInstruction = strictJson
     ? IMAGE_GATE_SYSTEM + STRICT_JSON_SUFFIX
     : IMAGE_GATE_SYSTEM;
 
+  logger.debug(
+    {
+      operation: "gate",
+      model,
+      strictJson,
+      imageBytes: input.imageBytes.length,
+      mimeType: input.mimeType,
+      declaredView: input.declaredView,
+      apiKeyConfigured: Boolean(envConfig.AI_API_KEY),
+    },
+    "gemini gate call start",
+  );
+
   const response = await withGeminiTimeout(
     client.models.generateContent({
-      model: resolveGateModel(strictJson),
+      model,
       contents: [
         {
           inlineData: {
@@ -84,7 +99,7 @@ async function callGeminiGateOnce(
       config: {
         systemInstruction,
         temperature: 0.1,
-        maxOutputTokens: 512,
+        maxOutputTokens: 1024,
         responseMimeType: "application/json",
         responseSchema: GEMINI_GATE_RESPONSE_SCHEMA,
       },
@@ -92,7 +107,20 @@ async function callGeminiGateOnce(
   );
 
   const parsed = parseGeminiResponse(response, gateResponseSchema);
-  return { data: parsed, usage: extractGeminiUsage(response) };
+  const usage = extractGeminiUsage(response);
+  logger.debug(
+    {
+      operation: "gate",
+      model,
+      isVehicle: parsed.is_vehicle,
+      viewAngle: parsed.view_angle,
+      imageQuality: parsed.image_quality,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+    },
+    "gemini gate call ok",
+  );
+  return { data: parsed, usage };
 }
 
 export async function gateImageWithGemini(
